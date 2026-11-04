@@ -1,0 +1,27 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "000000000000001",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": { "display_phone_number": "99900000001", "phone_number_id": "100000000000001" },
+            "statuses": [
+              { "id": "wamid.SIM.FIXTURE.3", "status": "delivered", "timestamp": "1767258100", "recipient_id": "99970000003" },
+              { "id": "wamid.SIM.FIXTURE.4", "status": "read", "timestamp": "1767258101", "recipient_id": "99970000004" },
+              { "id": "wamid.SIM.UNKNOWN.9", "status": "delivered", "timestamp": "1767258102", "recipient_id": "99970000009" },
+              { "id": "wamid.SIM.FIXTURE.5", "status": "deleted", "timestamp": "1767258103", "recipient_id": "99970000005" }
+            ]
+          },
+          "field": "messages"
+        },
+        {
+          "value": { "messaging_product": "whatsapp", "metadata": { "display_phone_number": "99900000001", "phone_number_id": "100000000000001" } },
+          "field": "account_update"
+        }
+      ]
+    }
+  ]
+}

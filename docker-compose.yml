@@ -1,0 +1,25 @@
+# Optional: app + Redis state store. `docker compose up --build`
+services:
+  app:
+    build: .
+    ports:
+      # Published on the host's loopback only. Put a reverse proxy in front to expose it.
+      - "127.0.0.1:3000:3000"
+    environment:
+      # 0.0.0.0 inside the container is required for the port mapping above.
+      HOST: 0.0.0.0
+      REDIS_URL: redis://redis:6379
+      # No fallback: set DEMO_TOKEN yourself, or leave it empty and read the
+      # generated token from `docker compose logs app`.
+      DEMO_TOKEN: ${DEMO_TOKEN:-}
+      SEED: ${SEED:-42}
+    depends_on:
+      redis:
+        condition: service_healthy
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

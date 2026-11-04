@@ -1,0 +1,169 @@
+# whatsapp-session-monitor-demo: every HTTP endpoint.
+# Simulated fleet. No real WhatsApp accounts. Every number is in the fake +999 range.
+#
+# Works with the VS Code "REST Client" extension or JetBrains HTTP Client.
+# Start the app first:  npm run demo
+# curl equivalents are given in comments where a request needs more than a header.
+
+@base = http://localhost:3000
+@token = demo-token
+@session = s18
+@waId = 99971000001
+
+###############################################################################
+# Health (public)
+###############################################################################
+
+### Liveness, provider, state store, clock mode, Cloud API mode
+GET {{base}}/api/health
+
+###############################################################################
+# Session fleet
+###############################################################################
+
+### Fleet table + summary (filters: state, problems, q)
+GET {{base}}/api/sessions?problems=1
+Authorization: Bearer {{token}}
+
+### Only stuck and logged-out sessions
+GET {{base}}/api/sessions?state=stuck,logged_out
+Authorization: Bearer {{token}}
+
+### One session: timeline, messages, alerts, simulator scenario
+GET {{base}}/api/sessions/{{session}}
+Authorization: Bearer {{token}}
+
+### Explicit relink: the only operation that replaces credentials
+POST {{base}}/api/sessions/{{session}}/relink
+Authorization: Bearer {{token}}
+
+### Send ONE message through a fleet session (fake +999 recipients only)
+POST {{base}}/api/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sessionId": "s01", "to": "+999 7000 0001", "text": "hello from the demo" }
+
+### Message history (sessionId, undelivered=1, limit 1-500)
+GET {{base}}/api/messages?undelivered=1&limit=50
+Authorization: Bearer {{token}}
+
+### Alert log with webhook delivery status
+GET {{base}}/api/alerts?limit=20
+Authorization: Bearer {{token}}
+
+### Live updates (SSE: fleet every 1 s, timeline, alert, inbox). EventSource cannot set
+### headers, so the token goes in the query string for this route only.
+# curl -N "http://localhost:3000/api/stream?token=demo-token"
+GET {{base}}/api/stream?token={{token}}
+
+###############################################################################
+# Simulated Cloud API number
+###############################################################################
+
+### Approved template catalog (simulated)
+GET {{base}}/api/templates
+Authorization: Bearer {{token}}
+
+### Send a text (same body shape as POST /{phone-number-id}/messages).
+### 200 means ACCEPTED only; sent/delivered/read/failed arrive later by signed webhook.
+POST {{base}}/api/messages/send
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "messaging_product": "whatsapp", "to": "+999 7100 0001", "type": "text", "text": { "body": "Your order is on the way." } }
+
+### Text to a customer whose 24 h window is closed -> 422, error.code 131047, source "local_guard"
+POST {{base}}/api/messages/send
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "messaging_product": "whatsapp", "to": "+999 7100 0008", "type": "text", "text": { "body": "hello?" } }
+
+### Template outside the window (allowed)
+POST {{base}}/api/messages/send
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "messaging_product": "whatsapp",
+  "to": "+999 7100 0008",
+  "type": "template",
+  "template": {
+    "name": "order_update",
+    "language": { "code": "ar" },
+    "components": [{ "type": "body", "parameters": [{ "type": "text", "text": "#A1001" }] }]
+  }
+}
+
+### Template with the wrong number of parameters -> 400, error.code 132000
+POST {{base}}/api/messages/send
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "to": "+999 7100 0001", "type": "template", "template": { "name": "appointment_reminder", "language": { "code": "en" }, "components": [] } }
+
+### Unknown template -> 404, error.code 132001
+POST {{base}}/api/messages/send
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "to": "+999 7100 0001", "type": "template", "template": { "name": "does_not_exist", "language": { "code": "en" } } }
+
+### Conversations with window state (open / expiresAt / remainingMs)
+GET {{base}}/api/inbox/conversations
+Authorization: Bearer {{token}}
+
+### One conversation: messages with status, error code, undelivered / late-delivery flags
+GET {{base}}/api/inbox/conversations/{{waId}}
+Authorization: Bearer {{token}}
+
+### Simulator control: a fake customer writes in (opens the 24 h window)
+POST {{base}}/api/sim/customer-reply
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "waId": "99971000008", "text": "Hi, any news?" }
+
+###############################################################################
+# Delivery-gap report
+###############################################################################
+
+### Per UTC day: accepted vs delivered, failures by reason (source: all | cloud | fleet, days 1-31)
+GET {{base}}/api/reports/delivery-gap?days=7&source=cloud
+Authorization: Bearer {{token}}
+
+### Same report as CSV (one row per day, one column per failure reason)
+# curl -H "Authorization: Bearer demo-token" -OJ "http://localhost:3000/api/reports/delivery-gap.csv?days=7&source=all"
+GET {{base}}/api/reports/delivery-gap.csv?days=7&source=all
+Authorization: Bearer {{token}}
+
+###############################################################################
+# Webhook receivers (no bearer token: they verify signatures instead)
+###############################################################################
+
+### Cloud API subscription handshake. Needs CLOUD_API_VERIFY_TOKEN=verify-me in .env
+GET {{base}}/webhooks/cloud-api?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=12345
+
+### Cloud API status / inbound webhook. Needs X-Hub-Signature-256 = HMAC-SHA256(app secret, raw body).
+### Set CLOUD_API_APP_SECRET in .env (otherwise a random per-process secret is used), then e.g.:
+#   BODY=$(cat test/fixtures/cloud-api/status-delivered.json)
+#   SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$CLOUD_API_APP_SECRET" -hex | sed 's/^.* //')"
+#   curl -X POST http://localhost:3000/webhooks/cloud-api -H "Content-Type: application/json" \
+#        -H "X-Hub-Signature-256: $SIG" --data-binary "$BODY"
+# Replays of the same body, duplicate (id, status) pairs and stale timestamps are acknowledged and ignored.
+# Without a valid signature the request below gets 401.
+POST {{base}}/webhooks/cloud-api
+Content-Type: application/json
+X-Hub-Signature-256: sha256=0000000000000000000000000000000000000000000000000000000000000000
+
+{ "object": "whatsapp_business_account", "entry": [] }
+
+### Built-in alert receiver (demo). Expects X-Monitor-Signature-256 over "<timestamp>.<body>"
+### with ALERT_WEBHOOK_SECRET; the monitor calls it itself. Unsigned requests get 401.
+POST {{base}}/demo/alert-sink
+Content-Type: application/json
+X-Monitor-Timestamp: 0
+X-Monitor-Signature-256: sha256=00
+
+{ "id": 1 }
